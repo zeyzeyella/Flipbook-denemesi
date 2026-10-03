@@ -3,119 +3,187 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>PDF Flipbook</title>
+  <title>PDF Görüntüleyici</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/page-flip/dist/js/page-flip.browser.js"></script>
   <style>
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
     }
-    html, body {
+    body, html {
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background-color: #333; /* Arka planı koyu yaparak sayfayı öne çıkardık */
-      display: flex;
-      justify-content: center;
-      align-items: center;
+      background-color: #1a1a1a;
+      font-family: sans-serif;
     }
-    #flipbook-container {
+    #app-container {
       width: 100vw;
       height: 100vh;
       display: flex;
-      justify-content: center;
+      flex-direction: column;
+      justify-content: space-between;
       align-items: center;
     }
-    .page {
-      background-color: white;
-      overflow: hidden;
+    #viewer-container {
+      width: 100%;
+      height: calc(100vh - 50px);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      position: relative;
     }
     canvas {
-      width: 100% !important;
-      height: 100% !important;
+      max-width: 100%;
+      max-height: 100%;
       object-fit: contain;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    }
+    /* Alt Gezinme Barı */
+    #controls {
+      height: 50px;
+      width: 100%;
+      background: #111;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 20px;
+      color: white;
+      font-size: 14px;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 5px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:disabled {
+      background: #444;
+      color: #888;
     }
   </style>
 </head>
 <body>
 
-  <div id="flipbook-container">
-    <div id="flipbook"></div>
+  <div id="app-container">
+    <div id="viewer-container">
+      <canvas id="pdf-canvas"></canvas>
+    </div>
+
+    <div id="controls">
+      <button id="prev-btn">Önceki</button>
+      <span id="page-num">Sayfa: 1 / 1</span>
+      <button id="next-btn">Sonraki</button>
+    </div>
   </div>
 
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-    const pdfUrl = 'dosya.pdf'; // PDF yolunuz
+    const pdfUrl = 'dosya.pdf'; // PDF dosya adın
 
-    async function renderPDF() {
-      const loadingTask = pdfjsLib.getDocument(pdfUrl);
-      const pdf = await loadingTask.promise;
-      const flipbookContainer = document.getElementById('flipbook');
+    let pdfDoc = null;
+    let pageNum = 1;
+    let pageRendering = false;
+    let pageNumPending = null;
 
-      // İlk sayfanın orijinal en/boy oranını al
-      const samplePage = await pdf.getPage(1);
-      const sampleViewport = samplePage.getViewport({ scale: 1 });
-      const aspectRatio = sampleViewport.width / sampleViewport.height;
+    const canvas = document.getElementById('pdf-canvas');
+    const ctx = canvas.getContext('2d');
 
-      // Ekran boyutlarını al
-      const screenWidth = window.innerWidth;
-      const screenHeight = window.innerHeight;
-      const isMobile = screenWidth < 768; // Mobil kontrolü
+    async function renderPage(num) {
+      pageRendering = true;
+      const page = await pdfDoc.getPage(num);
 
-      // Sayfa boyutlarını ekrana tam sığacak şekilde hesapla
-      let bookHeight = screenHeight * 0.95;
-      let bookWidth = bookHeight * aspectRatio;
+      // Ekran boyutunu al
+      const container = document.getElementById('viewer-container');
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
 
-      // Eğer hesaplanan genişlik ekrandan taşarsa genişliğe göre ayarla
-      const maxWidth = isMobile ? screenWidth * 0.95 : (screenWidth * 0.95) / 2;
-      if (bookWidth > maxWidth) {
-        bookWidth = maxWidth;
-        bookHeight = bookWidth / aspectRatio;
-      }
+      // Sayfayı ekrana tam sığdıracak ölçeği hesapla
+      const unscaledViewport = page.getViewport({ scale: 1 });
+      const scaleX = containerWidth / unscaledViewport.width;
+      const scaleY = containerHeight / unscaledViewport.height;
+      const scale = Math.min(scaleX, scaleY); // Taşmaması için en küçük ölçeği seç
 
-      // Sayfaları oluştur
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        const page = await pdf.getPage(pageNum);
-        
-        // Yüksek çözünürlük için scale 2
-        const viewport = page.getViewport({ scale: 2 });
+      // Yüksek netlik (Retina/Mobil ekranlar için 2x çözünürlük)
+      const viewport = page.getViewport({ scale: scale * 2 });
+      
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
 
-        const pageDiv = document.createElement('div');
-        pageDiv.className = 'page';
+      // CSS tarafında ekrana tam sığdır
+      canvas.style.width = `${viewport.width / 2}px`;
+      canvas.style.height = `${viewport.height / 2}px`;
 
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
+      const renderContext = {
+        canvasContext: ctx,
+        viewport: viewport
+      };
 
-        pageDiv.appendChild(canvas);
-        flipbookContainer.appendChild(pageDiv);
+      const renderTask = page.render(renderContext);
 
-        await page.render({
-          canvasContext: context,
-          viewport: viewport
-        }).promise;
-      }
-
-      // Flipbook ayarları
-      const pageFlip = new St.PageFlip(flipbookContainer, {
-        width: Math.floor(bookWidth),
-        height: Math.floor(bookHeight),
-        size: "fixed",
-        showCover: true,
-        usePortrait: isMobile, // Mobilde dikey modda TEK SAYFA gösterir
-        startPage: 0,
-        drawShadow: true,
-        maxShadowOpacity: 0.3
+      renderTask.promise.then(() => {
+        pageRendering = false;
+        if (pageNumPending !== null) {
+          renderPage(pageNumPending);
+          pageNumPending = null;
+        }
       });
 
-      pageFlip.loadFromHTML(document.querySelectorAll('.page'));
+      document.getElementById('page-num').textContent = `Sayfa: ${num} / ${pdfDoc.numPages}`;
+      document.getElementById('prev-btn').disabled = (num <= 1);
+      document.getElementById('next-btn').disabled = (num >= pdfDoc.numPages);
     }
 
-    renderPDF();
+    function queueRenderPage(num) {
+      if (pageRendering) {
+        pageNumPending = num;
+      } else {
+        renderPage(num);
+      }
+    }
+
+    function onPrevPage() {
+      if (pageNum <= 1) return;
+      pageNum--;
+      queueRenderPage(pageNum);
+    }
+
+    function onNextPage() {
+      if (pageNum >= pdfDoc.numPages) return;
+      pageNum++;
+      queueRenderPage(pageNum);
+    }
+
+    document.getElementById('prev-btn').addEventListener('click', onPrevPage);
+    document.getElementById('next-btn').addEventListener('click', onNextPage);
+
+    // Dokunarak Sayfa Değiştirme (Swipe)
+    let touchStartX = 0;
+    document.getElementById('viewer-container').addEventListener('touchstart', e => {
+      touchStartX = e.changedTouches[0].screenX;
+    });
+
+    document.getElementById('viewer-container').addEventListener('touchend', e => {
+      let touchEndX = e.changedTouches[0].screenX;
+      if (touchStartX - touchEndX > 50) onNextPage(); // Sola kaydır -> Sonraki
+      if (touchEndX - touchStartX > 50) onPrevPage(); // Sağa kaydır -> Önceki
+    });
+
+    // PDF Yükle
+    pdfjsLib.getDocument(pdfUrl).promise.then(pdfDoc_ => {
+      pdfDoc = pdfDoc_;
+      renderPage(pageNum);
+    });
+
+    // Ekran döndürüldüğünde/boyut değiştiğinde yeniden hesapla
+    window.addEventListener('resize', () => {
+      if (pdfDoc) renderPage(pageNum);
+    });
   </script>
 </body>
 </html>
