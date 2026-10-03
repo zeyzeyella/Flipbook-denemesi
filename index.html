@@ -3,10 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PDF Flipbook</title>
+  <title>PDF Flipbook - Ekrana Sığdırılmış</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/page-flip/dist/js/page-flip.browser.js"></script>
   <style>
+    * {
+      box-sizing: border-box;
+    }
     body {
       margin: 0;
       padding: 0;
@@ -14,11 +17,16 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      min-height: 100vh;
-      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden; /* Taşma ve kaydırma çubuklarını engeller */
     }
-    #flipbook {
-      box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+    #flipbook-wrapper {
+      width: 95vw;  /* Ekranın %95 genişliği */
+      height: 95vh; /* Ekranın %95 yüksekliği */
+      display: flex;
+      justify-content: center;
+      align-items: center;
     }
     .page {
       background-color: white;
@@ -31,55 +39,60 @@
 </head>
 <body>
 
-  <div id="flipbook"></div>
+  <div id="flipbook-wrapper">
+    <div id="flipbook"></div>
+  </div>
 
   <script>
-    // PDF.js worker ayarı
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-    // Buraya kendi PDF dosyanızın yolunu girin
-    const pdfUrl = 'word list.pdf'; 
+    const pdfUrl = 'dosya.pdf'; // PDF dosya yolunuz
 
     async function renderPDF() {
       const loadingTask = pdfjsLib.getDocument(pdfUrl);
       const pdf = await loadingTask.promise;
       const flipbookContainer = document.getElementById('flipbook');
 
-      // İlk sayfadan boyut al
-      const firstPage = await pdf.getPage(1);
-      const viewport = firstPage.getViewport({ scale: 1.5 });
+      // 1. Ekran boyutlarına göre dinamik sayfa boyutu hesaplama
+      const wrapper = document.getElementById('flipbook-wrapper');
+      const containerWidth = wrapper.clientWidth;
+      const containerHeight = wrapper.clientHeight;
 
-      // Her PDF sayfasını birer canvas olarak oluştur
+      // Çift sayfa açılacağı için sayfa genişliği alanın yarısı kadar hesaplanır
+      const calculatedWidth = Math.floor(containerWidth / 2);
+      const calculatedHeight = containerHeight;
+
+      // 2. Yüksek kaliteli render için PDF sayfalarını çizme
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         const page = await pdf.getPage(pageNum);
-        const pageViewport = page.getViewport({ scale: 1.5 });
+        const viewport = page.getViewport({ scale: 2 }); // Net görünüm için 2.0 ölçek
 
         const pageDiv = document.createElement('div');
         pageDiv.className = 'page';
 
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
-        canvas.height = pageViewport.height;
-        canvas.width = pageViewport.width;
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
 
         pageDiv.appendChild(canvas);
         flipbookContainer.appendChild(pageDiv);
 
         await page.render({
           canvasContext: context,
-          viewport: pageViewport
+          viewport: viewport
         }).promise;
       }
 
-      // Flipbook başlat
+      // 3. Flipbook'u ekran boyutuna göre başlatma
       const pageFlip = new St.PageFlip(flipbookContainer, {
-        width: viewport.width,
-        height: viewport.height,
-        size: "stretch",
-        minWidth: 300,
-        maxWidth: 1000,
-        minHeight: 400,
-        maxHeight: 1200,
+        width: calculatedWidth,
+        height: calculatedHeight,
+        size: "stretch",          // Esnek boyutlandırma
+        minWidth: 200,
+        maxWidth: 2000,
+        minHeight: 300,
+        maxHeight: 2000,
         maxShadowOpacity: 0.5,
         showCover: true
       });
