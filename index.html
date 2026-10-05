@@ -1,189 +1,281 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>PDF Görüntüleyici</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-  <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-    body, html {
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background-color: #1a1a1a;
-      font-family: sans-serif;
-    }
-    #app-container {
-      width: 100vw;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      align-items: center;
-    }
-    #viewer-container {
-      width: 100%;
-      height: calc(100vh - 50px);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      position: relative;
-    }
-    canvas {
-      max-width: 100%;
-      max-height: 100%;
-      object-fit: contain;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-    }
-    /* Alt Gezinme Barı */
-    #controls {
-      height: 50px;
-      width: 100%;
-      background: #111;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 0 20px;
-      color: white;
-      font-size: 14px;
-    }
-    button {
-      background: #007bff;
-      color: white;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 5px;
-      font-weight: bold;
-      cursor: pointer;
-    }
-    button:disabled {
-      background: #444;
-      color: #888;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dergi</title>
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    min-height: 100%;
+    background: #f4f1ec;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #333;
+  }
+
+  body {
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 24px 100px;   /* üst, sağ-sol, alt boşluk */
+  }
+
+  #book-wrap {
+    width: 100%;
+    max-width: 900px;
+    display: flex;
+    justify-content: center;
+  }
+
+  /* Kapak ve arka kapak ortalanırken yumuşak kayma */
+  #book { transition: transform .5s ease; }
+
+  /* Oklar her zaman ekranın altında görünür */
+  .controls {
+    position: fixed;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 15px;
+    background: rgba(255,255,255,0.6);
+    padding: 6px 14px;
+    border-radius: 999px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.08);
+    z-index: 10;
+    opacity: 0.5;
+    transition: opacity .3s ease;
+  }
+
+  .controls:hover{opacity: 0.9;}
+  .controls button {
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    background: #333;
+    color: #fff;
+    font-size: 22px;
+    cursor: pointer;
+    transition: background .2s;
+  }
+  .controls button:hover { background: #000; }
+
+  #pageInfo { min-width: 80px; text-align: center; }
+
+  #loading { font-size: 16px; }
+
+    /* 1. Kütüphanenin kendi içindeki tüm zorunlu beyaz arka planları ve gölgeleri sıfırlıyoruz */
+  .stPageFlip .--left, 
+  .stPageFlip .--right {
+    background: transparent !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
+  }
+
+  /* 2. Sadece üzerinde gerçek içerik/resim olan sayfalara şık bir gölge veriyoruz */
+  .stPageFlip canvas, 
+  .stPageFlip img {
+    background-color: #ffffff; /* İç sayfaların beyaz kalmasını sağlar */
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15) !important;
+  }
+
+  /* 3. İlk sayfa (Kapak) siyah olduğu için arkasından beyazlık sızmasını engelliyoruz */
+  .stPageFlip .page:first-child canvas,
+  .stPageFlip .page:first-child img {
+    background-color: #1a1a1a !important; /* Kapağın arkasını koyu yapar */
+  }
+
+</style>
 </head>
+
 <body>
 
-  <div id="app-container">
-    <div id="viewer-container">
-      <canvas id="pdf-canvas"></canvas>
-    </div>
+<div id="loading">Dergi yükleniyor…</div>
+<div id="book-wrap"><div id="book"></div></div>
 
-    <div id="controls">
-      <button id="prev-btn">Önceki</button>
-      <span id="page-num">Sayfa: 1 / 1</span>
-      <button id="next-btn">Sonraki</button>
-    </div>
-  </div>
+<div class="controls" style="visibility:hidden" id="controls">
+  <button id="prev" aria-label="Önceki">‹</button>
+  <span id="pageInfo"></span>
+  <button id="next" aria-label="Sonraki">›</button>
+</div>
 
-  <script>
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+<!-- Kütüphaneler -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.min.js"></script>
 
-    const pdfUrl = 'word list.pdf'; // PDF dosya adın
+<script>
+/* ============================================================
+   ✏️ AYARLAR — SADECE BURAYI DÜZENLEYİN
+   ============================================================ */
 
-    let pdfDoc = null;
-    let pageNum = 1;
-    let pageRendering = false;
-    let pageNumPending = null;
+// "pdf" yazarsanız aşağıdaki PDF dosyası kullanılır,
+// "jpg" yazarsanız aşağıdaki resim listesi kullanılır.
+const MOD = "pdf";
 
-    const canvas = document.getElementById('pdf-canvas');
-    const ctx = canvas.getContext('2d');
+// 📄 >>> PDF DOSYASINI BURAYA KOYUN <<<
+// PDF'i bu index.html ile aynı klasöre atın ve adını aşağıya yazın.
+const PDF_DOSYASI = "dergi.pdf";
 
-    async function renderPage(num) {
-      pageRendering = true;
-      const page = await pdfDoc.getPage(num);
+// 🖼️ >>> JPG KULLANACAKSANIZ SAYFALARI BURAYA SIRAYLA YAZIN <<<
+// İlk resim ön kapak, son resim arka kapak olmalı.
+const RESIMLER = [
+  "resimler/sayfa1.jpg",
+  "resimler/sayfa2.jpg",
+  "resimler/sayfa3.jpg",
+  "resimler/sayfa4.jpg"
+];
 
-      // Ekran boyutunu al
-      const container = document.getElementById('viewer-container');
-      const containerWidth = container.clientWidth;
-      const containerHeight = container.clientHeight;
+// Kalite (PDF için): 1.5 dengeli, 2 daha net ama yavaş yüklenir
+const PDF_KALITE = 1.5;
 
-      // Sayfayı ekrana tam sığdıracak ölçeği hesapla
-      const unscaledViewport = page.getViewport({ scale: 1 });
-      const scaleX = containerWidth / unscaledViewport.width;
-      const scaleY = containerHeight / unscaledViewport.height;
-      const scale = Math.min(scaleX, scaleY); // Taşmaması için en küçük ölçeği seç
+/* ============================================================
+   Bundan sonrasına dokunmanıza gerek yok
+   ============================================================ */
 
-      // Yüksek netlik (Retina/Mobil ekranlar için 2x çözünürlük)
-      const viewport = page.getViewport({ scale: scale * 2 });
-      
-      canvas.height = viewport.height;
-      canvas.width = viewport.width;
+const loading = document.getElementById("loading");
+const controls = document.getElementById("controls");
+const pageInfo = document.getElementById("pageInfo");
+const bookEl = document.getElementById("book");
 
-      // CSS tarafında ekrana tam sığdır
-      canvas.style.width = `${viewport.width / 2}px`;
-      canvas.style.height = `${viewport.height / 2}px`;
+async function pdfSayfalariniHazirla() {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-      const renderContext = {
-        canvasContext: ctx,
-        viewport: viewport
-      };
+  const pdf = await pdfjsLib.getDocument(PDF_DOSYASI).promise;
+  const resimler = [];
+  let oran = 0.7; // genişlik / yükseklik
 
-      const renderTask = page.render(renderContext);
+  for (let i = 1; i <= pdf.numPages; i++) {
+    loading.textContent = `Sayfalar hazırlanıyor… ${i} / ${pdf.numPages}`;
+    const page = await pdf.getPage(i);
+    const vp = page.getViewport({ scale: PDF_KALITE });
+    if (i === 1) oran = vp.width / vp.height;
 
-      renderTask.promise.then(() => {
-        pageRendering = false;
-        if (pageNumPending !== null) {
-          renderPage(pageNumPending);
-          pageNumPending = null;
-        }
-      });
+    const canvas = document.createElement("canvas");
+    canvas.width = vp.width;
+    canvas.height = vp.height;
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+    resimler.push(canvas.toDataURL("image/jpeg", 0.85));
+  }
+  return { resimler, oran };
+}
 
-      document.getElementById('page-num').textContent = `Sayfa: ${num} / ${pdfDoc.numPages}`;
-      document.getElementById('prev-btn').disabled = (num <= 1);
-      document.getElementById('next-btn').disabled = (num >= pdfDoc.numPages);
+function resimOraniniBul(url) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img.naturalWidth / img.naturalHeight);
+    img.onerror = () => resolve(0.7);
+    img.src = url;
+  });
+}
+
+function bosSayfaOlustur(oran) {
+  const c = document.createElement("canvas");
+  c.width = 600;
+  c.height = Math.round(600 / oran);
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", 0.8);
+}
+
+async function baslat() {
+  try {
+    let resimler, oran;
+
+    if (MOD === "pdf") {
+      ({ resimler, oran } = await pdfSayfalariniHazirla());
+    } else {
+      resimler = RESIMLER.slice();
+      oran = await resimOraniniBul(RESIMLER[0]);
     }
 
-    function queueRenderPage(num) {
-      if (pageRendering) {
-        pageNumPending = num;
-      } else {
-        renderPage(num);
+    // Arka kapağın tek başına kalması için toplam sayfa sayısı çift olmalı.
+    // Tek ise arka kapağın önüne boş bir iç sayfa eklenir.
+    if (resimler.length > 2 && resimler.length % 2 === 1) {
+      resimler.splice(resimler.length - 1, 0, bosSayfaOlustur(oran));
+    }
+
+    const sayfaGenislik = 500;
+    const sayfaYukseklik = Math.round(sayfaGenislik / oran);
+
+    // Ekrana sığması için yükseklik sınırı (oklar ve boşluklar için pay bırakır)
+    const enYuksek = Math.max(360, window.innerHeight - 170);
+
+    const flip = new St.PageFlip(bookEl, {
+      width: sayfaGenislik,
+      height: sayfaYukseklik,
+      size: "stretch",
+      minWidth: 280,
+      maxWidth: 600,
+      minHeight: 360,
+      maxHeight: enYuksek,
+      showCover: true,            // ilk ve son sayfa kapak olarak tek durur
+      usePortrait: true,          // telefonda tek sayfa gösterir
+      maxShadowOpacity: 0.4,
+      mobileScrollSupport: false
+    });
+
+    flip.loadFromImages(resimler);
+
+    // Kapak / arka kapak tek sayfa olduğunda ortala
+    const konumla = () => {
+      if (!flip.getBoundsRect()) return;
+      const i = flip.getCurrentPageIndex();
+      const n = flip.getPageCount();
+      let kaydir = 0;
+      if (flip.getOrientation() === "landscape") {
+        // Dergideki gerçek tek sayfa genişliği (piksel)
+        const sayfaPx = flip.getBoundsRect().pageWidth;
+        if (i === 0) kaydir = -sayfaPx / 2;           // ön kapak: sağdaki sayfayı ortaya al
+        else if (i === n - 1) kaydir = sayfaPx / 2;   // arka kapak: soldaki sayfayı ortaya al
       }
-    }
+      bookEl.style.transform = `translateX(${kaydir}px)`;
+    };
 
-    function onPrevPage() {
-      if (pageNum <= 1) return;
-      pageNum--;
-      queueRenderPage(pageNum);
-    }
-
-    function onNextPage() {
-      if (pageNum >= pdfDoc.numPages) return;
-      pageNum++;
-      queueRenderPage(pageNum);
-    }
-
-    document.getElementById('prev-btn').addEventListener('click', onPrevPage);
-    document.getElementById('next-btn').addEventListener('click', onNextPage);
-
-    // Dokunarak Sayfa Değiştirme (Swipe)
-    let touchStartX = 0;
-    document.getElementById('viewer-container').addEventListener('touchstart', e => {
-      touchStartX = e.changedTouches[0].screenX;
+    // Pencere boyutu değişince yeniden ortala
+    let yenidenBoyutTimer;
+    window.addEventListener("resize", () => {
+      clearTimeout(yenidenBoyutTimer);
+      yenidenBoyutTimer = setTimeout(konumla, 250);
     });
 
-    document.getElementById('viewer-container').addEventListener('touchend', e => {
-      let touchEndX = e.changedTouches[0].screenX;
-      if (touchStartX - touchEndX > 50) onNextPage(); // Sola kaydır -> Sonraki
-      if (touchEndX - touchStartX > 50) onPrevPage(); // Sağa kaydır -> Önceki
+    const guncelle = () => {
+      pageInfo.textContent = `${flip.getCurrentPageIndex() + 1} / ${flip.getPageCount()}`;
+      konumla();
+    };
+
+    flip.on("flip", guncelle);
+    flip.on("changeOrientation", guncelle);
+    guncelle();
+
+    document.getElementById("prev").onclick = () => flip.flipPrev();
+    document.getElementById("next").onclick = () => flip.flipNext();
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft") flip.flipPrev();
+      if (e.key === "ArrowRight") flip.flipNext();
     });
 
-    // PDF Yükle
-    pdfjsLib.getDocument(pdfUrl).promise.then(pdfDoc_ => {
-      pdfDoc = pdfDoc_;
-      renderPage(pageNum);
-    });
+    loading.style.display = "none";
+    controls.style.visibility = "visible";
+    setTimeout(konumla, 100);
+  } catch (err) {
+    console.error(err);
+    loading.textContent =
+      "Dergi yüklenemedi. Dosya yolunu kontrol edin ve sayfayı bir sunucu üzerinden açın.";
+  }
+}
 
-    // Ekran döndürüldüğünde/boyut değiştiğinde yeniden hesapla
-    window.addEventListener('resize', () => {
-      if (pdfDoc) renderPage(pageNum);
-    });
-  </script>
+baslat();
+</script>
+
 </body>
 </html>
